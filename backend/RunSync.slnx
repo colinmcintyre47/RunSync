@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="RunSync.Api.Tests/RunSync.Api.Tests.csproj" />
+  <Project Path="RunSync.Api/RunSync.Api.csproj" />
+</Solution>

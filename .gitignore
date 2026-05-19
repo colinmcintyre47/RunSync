@@ -1,0 +1,40 @@
+# ── Secrets (never commit these) ─────────────────────────────────────────────
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Staging.json
+.env
+.env.local
+.env.*.local
+
+# ── .NET build output ─────────────────────────────────────────────────────────
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# ── Node.js ───────────────────────────────────────────────────────────────────
+node_modules/
+dist/
+.vite/
+
+# ── IDE / editor ──────────────────────────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── AWS ───────────────────────────────────────────────────────────────────────
+.aws/
+aws-credentials
+*.pem
+
+# ── Test results ──────────────────────────────────────────────────────────────
+TestResults/
+coverage/
+*.trx
+
+# ── EF Core ───────────────────────────────────────────────────────────────────
+# Keep Migrations/ folder but ignore any generated SQL scripts
+*.sql
