@@ -266,25 +266,39 @@ public class StravaService : IStravaService
         {
             StravaToken newToken = new()
             {
-                UserId = userId,
-                AccessToken = dto.AccessToken,
-                RefreshToken = dto.RefreshToken,
-                ExpiresAt = dto.ExpiresAt,
+                UserId          = userId,
+                AccessToken     = dto.AccessToken,
+                RefreshToken    = dto.RefreshToken,
+                ExpiresAt       = dto.ExpiresAt,
                 StravaAthleteId = dto.Athlete?.Id ?? 0,
-                LastSyncedAt = DateTime.MinValue
+                LastSyncedAt    = DateTime.MinValue,
             };
+            ApplyAthleteProfile(newToken, dto.Athlete);
             _db.StravaTokens.Add(newToken);
         }
         else
         {
-            existing.AccessToken = dto.AccessToken;
+            existing.AccessToken  = dto.AccessToken;
             existing.RefreshToken = dto.RefreshToken;
-            existing.ExpiresAt = dto.ExpiresAt;
+            existing.ExpiresAt    = dto.ExpiresAt;
             if (dto.Athlete is not null)
+            {
                 existing.StravaAthleteId = dto.Athlete.Id;
+                ApplyAthleteProfile(existing, dto.Athlete);
+            }
         }
 
         await _db.SaveChangesAsync();
+    }
+
+    private static void ApplyAthleteProfile(StravaToken token, StravaAthleteDto? athlete)
+    {
+        if (athlete is null) return;
+        token.AthleteFirstName  = athlete.FirstName;
+        token.AthleteLastName   = athlete.LastName;
+        token.AthleteProfileUrl = athlete.ProfileUrl;
+        token.AthleteCity       = athlete.City;
+        token.AthleteState      = athlete.State;
     }
 
     private async Task UpsertActivityAsync(int userId, StravaActivityDto dto)
@@ -298,16 +312,23 @@ public class StravaService : IStravaService
         }
         else
         {
-            // Update all mutable fields — the user may have edited the activity on Strava
-            existing.Name = dto.Name;
-            existing.DistanceMeters = dto.Distance;
-            existing.MovingTimeSeconds = dto.MovingTime;
-            existing.AverageHeartrate = dto.AverageHeartrate;
-            existing.AverageSpeed = dto.AverageSpeed;
+            existing.Name               = dto.Name;
+            existing.DistanceMeters     = dto.Distance;
+            existing.MovingTimeSeconds  = dto.MovingTime;
+            existing.AverageHeartrate   = dto.AverageHeartrate;
+            existing.AverageSpeed       = dto.AverageSpeed;
             existing.TotalElevationGain = dto.TotalElevationGain;
-            existing.StartDateUtc = dto.StartDate;
-            existing.StartDateLocal = dto.StartDateLocal;
-            existing.IsManualEntry = dto.Manual;
+            existing.StartDateUtc       = dto.StartDate;
+            existing.StartDateLocal     = dto.StartDateLocal;
+            existing.IsManualEntry      = dto.Manual;
+            existing.SufferScore        = dto.SufferScore;
+            existing.AverageCadence     = dto.AverageCadence;
+            existing.WorkoutType        = dto.WorkoutType ?? 0;
+            existing.MaxHeartrate       = dto.MaxHeartrate;
+            existing.SportType          = dto.SportType;
+            existing.ElapsedTimeSeconds = dto.ElapsedTime;
+            existing.PrCount            = dto.PrCount;
+            existing.SummaryPolyline    = dto.Map?.SummaryPolyline ?? string.Empty;
         }
 
         await _db.SaveChangesAsync();
@@ -315,18 +336,26 @@ public class StravaService : IStravaService
 
     private static StravaActivity MapToEntity(int userId, StravaActivityDto dto) => new()
     {
-        Id = dto.Id,
-        UserId = userId,
-        Name = dto.Name,
-        Type = dto.Type,
-        DistanceMeters = dto.Distance,
-        MovingTimeSeconds = dto.MovingTime,
-        AverageHeartrate = dto.AverageHeartrate,
-        AverageSpeed = dto.AverageSpeed,
-        TotalElevationGain = dto.TotalElevationGain,
-        StartDateUtc = dto.StartDate,
-        StartDateLocal = dto.StartDateLocal,
-        IsManualEntry = dto.Manual
+        Id                  = dto.Id,
+        UserId              = userId,
+        Name                = dto.Name,
+        Type                = dto.Type,
+        DistanceMeters      = dto.Distance,
+        MovingTimeSeconds   = dto.MovingTime,
+        AverageHeartrate    = dto.AverageHeartrate,
+        AverageSpeed        = dto.AverageSpeed,
+        TotalElevationGain  = dto.TotalElevationGain,
+        StartDateUtc        = dto.StartDate,
+        StartDateLocal      = dto.StartDateLocal,
+        IsManualEntry       = dto.Manual,
+        SufferScore         = dto.SufferScore,
+        AverageCadence      = dto.AverageCadence,
+        WorkoutType         = dto.WorkoutType ?? 0,
+        MaxHeartrate        = dto.MaxHeartrate,
+        SportType           = dto.SportType,
+        ElapsedTimeSeconds  = dto.ElapsedTime,
+        PrCount             = dto.PrCount,
+        SummaryPolyline     = dto.Map?.SummaryPolyline ?? string.Empty,
     };
 
     /// <summary>

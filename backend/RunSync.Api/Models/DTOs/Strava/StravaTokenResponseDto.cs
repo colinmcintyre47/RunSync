@@ -27,9 +27,24 @@ public class StravaTokenResponseDto
     public StravaAthleteDto? Athlete { get; set; }
 }
 
-// Partial athlete object — we only need the ID from this response
 public class StravaAthleteDto
 {
     [JsonPropertyName("id")]
     public int Id { get; set; }
+
+    [JsonPropertyName("firstname")]
+    public string FirstName { get; set; } = string.Empty;
+
+    [JsonPropertyName("lastname")]
+    public string LastName { get; set; } = string.Empty;
+
+    // Full-resolution profile photo URL
+    [JsonPropertyName("profile")]
+    public string ProfileUrl { get; set; } = string.Empty;
+
+    [JsonPropertyName("city")]
+    public string City { get; set; } = string.Empty;
+
+    [JsonPropertyName("state")]
+    public string State { get; set; } = string.Empty;
 }

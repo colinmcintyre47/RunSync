@@ -26,4 +26,6 @@ public class User
     public StravaToken? StravaToken { get; set; }
 
     public ICollection<StravaActivity> Activities { get; set; } = new List<StravaActivity>();
+
+    public UserTrainingPlan? TrainingPlan { get; set; }
 }

@@ -74,10 +74,25 @@ public class ActivityService : IActivityService
         return result;
     }
 
-    /// <summary>
-    /// Returns last sync timestamp, total cached activity count, and whether Strava is connected.
-    /// → Called by ActivitiesController.cs → GetSyncStatus()
-    /// </summary>
+    public async Task<AthleteProfileDto?> GetAthleteProfileAsync(int userId)
+    {
+        Models.Entities.StravaToken? token = await _db.StravaTokens
+            .FirstOrDefaultAsync(t => t.UserId == userId);
+
+        if (token is null || string.IsNullOrEmpty(token.AthleteFirstName))
+            return null;
+
+        return new AthleteProfileDto
+        {
+            FirstName       = token.AthleteFirstName,
+            LastName        = token.AthleteLastName,
+            ProfileUrl      = token.AthleteProfileUrl,
+            City            = token.AthleteCity,
+            State           = token.AthleteState,
+            StravaAthleteId = token.StravaAthleteId,
+        };
+    }
+
     public async Task<(DateTime? LastSyncedAt, int TotalActivities, bool IsConnected)> GetSyncStatusAsync(int userId)
     {
         Models.Entities.StravaToken? token = await _db.StravaTokens
@@ -88,6 +103,103 @@ public class ActivityService : IActivityService
         DateTime? lastSync = token?.LastSyncedAt == DateTime.MinValue ? null : token?.LastSyncedAt;
 
         return (lastSync, count, token is not null);
+    }
+
+    /// <summary>
+    /// Returns actual Strava runs grouped into rolling calendar weeks (Mon–Sun), newest first.
+    /// Weeks with no runs are omitted.
+    /// </summary>
+    public async Task<List<WeekSummaryDto>> GetWeeklyLogAsync(int userId)
+    {
+        List<StravaActivity> activities = await _db.StravaActivities
+            .Where(a => a.UserId == userId)
+            .OrderByDescending(a => a.StartDateLocal)
+            .ToListAsync();
+
+        if (activities.Count == 0)
+            return [];
+
+        // Group by ISO week (Mon–Sun)
+        var grouped = activities
+            .GroupBy(a => GetWeekStart(DateOnly.FromDateTime(a.StartDateLocal)))
+            .OrderByDescending(g => g.Key);
+
+        return grouped.Select(g =>
+        {
+            DateOnly weekStart = g.Key;
+            DateOnly weekEnd   = weekStart.AddDays(6);
+            List<RunActivityDto> runs = g
+                .OrderByDescending(a => a.StartDateLocal)
+                .Select(MapToRunDto)
+                .ToList();
+
+            return new WeekSummaryDto
+            {
+                WeekLabel  = $"Week of {weekStart:MMMM d}",
+                WeekStart  = weekStart,
+                WeekEnd    = weekEnd,
+                RunCount   = runs.Count,
+                TotalMiles = MathF.Round(runs.Sum(r => r.Miles), 1),
+                Runs       = runs,
+            };
+        }).ToList();
+    }
+
+    /// <summary>
+    /// Computes the four dashboard stats: miles/runs this week, all-time miles, weekly streak.
+    /// "This week" = the current Mon–Sun window in local time.
+    /// "Weekly streak" = consecutive weeks going back from the most recent week that has a run.
+    /// </summary>
+    public async Task<DashboardStatsDto> GetDashboardStatsAsync(int userId)
+    {
+        List<StravaActivity> activities = await _db.StravaActivities
+            .Where(a => a.UserId == userId)
+            .ToListAsync();
+
+        if (activities.Count == 0)
+            return new DashboardStatsDto();
+
+        DateOnly today        = DateOnly.FromDateTime(DateTime.Now);
+        DateOnly thisWeekStart = GetWeekStart(today);
+
+        var thisWeekRuns = activities
+            .Where(a => DateOnly.FromDateTime(a.StartDateLocal) >= thisWeekStart &&
+                        DateOnly.FromDateTime(a.StartDateLocal) <= thisWeekStart.AddDays(6))
+            .ToList();
+
+        float milesThisWeek = MathF.Round(thisWeekRuns.Sum(a => MetersToMiles(a.DistanceMeters)), 1);
+        float totalMiles    = MathF.Round(activities.Sum(a => MetersToMiles(a.DistanceMeters)), 1);
+
+        // Build a set of distinct week-start dates that have at least one run
+        var weeksWithRuns = activities
+            .Select(a => GetWeekStart(DateOnly.FromDateTime(a.StartDateLocal)))
+            .Distinct()
+            .OrderByDescending(w => w)
+            .ToList();
+
+        // Count consecutive weeks going back from the most recent active week
+        int streak = 0;
+        if (weeksWithRuns.Count > 0)
+        {
+            DateOnly cursor = weeksWithRuns[0];
+            foreach (DateOnly week in weeksWithRuns)
+            {
+                if (week == cursor)
+                {
+                    streak++;
+                    cursor = cursor.AddDays(-7);
+                }
+                else break;
+            }
+        }
+
+        return new DashboardStatsDto
+        {
+            MilesThisWeek    = milesThisWeek,
+            RunsThisWeek     = thisWeekRuns.Count,
+            TotalMilesAllTime = totalMiles,
+            WeeklyStreak     = streak,
+        };
     }
 
     // ─── Private helpers ────────────────────────────────────────────────────
@@ -117,6 +229,71 @@ public class ActivityService : IActivityService
         dto.ElevationGainFeet = MathF.Round(activity.TotalElevationGain / 0.3048f, 0);
 
         return dto;
+    }
+
+    // Returns the Monday of the ISO week containing the given date.
+    private static DateOnly GetWeekStart(DateOnly date)
+    {
+        int daysFromMonday = ((int)date.DayOfWeek + 6) % 7; // Sun=0 → 6, Mon=1 → 0, …
+        return date.AddDays(-daysFromMonday);
+    }
+
+    private static RunActivityDto MapToRunDto(StravaActivity a)
+    {
+        float miles = MetersToMiles(a.DistanceMeters);
+        return new RunActivityDto
+        {
+            StravaId          = a.Id,
+            Name              = a.Name,
+            Date              = a.StartDateLocal,
+            Miles             = MathF.Round(miles, 2),
+            Pace              = FormatPace(a.MovingTimeSeconds, miles),
+            AvgHeartrate      = a.AverageHeartrate > 0 ? a.AverageHeartrate : null,
+            MaxHeartrate      = a.MaxHeartrate > 0 ? a.MaxHeartrate : null,
+            ElevationGainFeet = MathF.Round(a.TotalElevationGain / 0.3048f, 0),
+            EffortLevel       = ClassifyEffort(miles, a.WorkoutType),
+            IsManualEntry     = a.IsManualEntry,
+            SufferScore       = a.SufferScore,
+            AverageCadence    = a.AverageCadence > 0 ? a.AverageCadence : null,
+            WorkoutTypeLabel  = WorkoutTypeToLabel(a.WorkoutType),
+            SportType         = string.IsNullOrEmpty(a.SportType) ? "Run" : a.SportType,
+            ElapsedTimeSeconds = a.ElapsedTimeSeconds,
+            ElapsedTime       = FormatDuration(a.ElapsedTimeSeconds),
+            MovingTime        = FormatDuration(a.MovingTimeSeconds),
+            PrCount           = a.PrCount,
+            SummaryPolyline   = a.SummaryPolyline,
+        };
+    }
+
+    private static string ClassifyEffort(float miles, int workoutType) => workoutType switch
+    {
+        1 => "Race",
+        2 => "Long Run",
+        3 => "Workout",
+        _ => miles switch
+        {
+            < 3f  => "Short Run",
+            < 6f  => "Easy Run",
+            < 10f => "Moderate Run",
+            _     => "Long Run",
+        }
+    };
+
+    private static string WorkoutTypeToLabel(int workoutType) => workoutType switch
+    {
+        1 => "Race",
+        2 => "Long Run",
+        3 => "Workout",
+        _ => "Run",
+    };
+
+    private static string FormatDuration(int totalSeconds)
+    {
+        if (totalSeconds <= 0) return "--:--";
+        int h = totalSeconds / 3600;
+        int m = (totalSeconds % 3600) / 60;
+        int s = totalSeconds % 60;
+        return h > 0 ? $"{h}:{m:D2}:{s:D2}" : $"{m}:{s:D2}";
     }
 
     private static float MetersToMiles(float meters) => meters / 1609.34f;

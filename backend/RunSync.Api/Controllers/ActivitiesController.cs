@@ -50,12 +50,6 @@ public class ActivitiesController : ControllerBase
         return Ok(plan);
     }
 
-    /// <summary>
-    /// Returns the sync status: when activities were last fetched, how many are cached,
-    /// and whether the user's Strava account is currently connected.
-    /// The frontend uses this to render the SyncStatus component.
-    /// → See ActivityService.cs → GetSyncStatusAsync()
-    /// </summary>
     [HttpGet("sync-status")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetSyncStatus()
@@ -63,12 +57,49 @@ public class ActivitiesController : ControllerBase
         int userId = _tokenService.GetUserIdFromToken(User);
         (DateTime? lastSyncedAt, int totalActivities, bool isConnected) = await _activityService.GetSyncStatusAsync(userId);
 
-        return Ok(new
-        {
-            lastSyncedAt,
-            totalActivities,
-            isConnected
-        });
+        return Ok(new { lastSyncedAt, totalActivities, isConnected });
+    }
+
+    /// <summary>
+    /// Returns actual Strava runs grouped into rolling calendar weeks (Mon–Sun), newest first.
+    /// Replaces the fixed 12-week plan view — works for any user regardless of their training goal.
+    /// → See ActivityService.cs → GetWeeklyLogAsync()
+    /// </summary>
+    [HttpGet("weekly-log")]
+    [ProducesResponseType(typeof(List<WeekSummaryDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetWeeklyLog()
+    {
+        int userId = _tokenService.GetUserIdFromToken(User);
+        List<WeekSummaryDto> weeks = await _activityService.GetWeeklyLogAsync(userId);
+        return Ok(weeks);
+    }
+
+    /// <summary>
+    /// Returns the four dashboard stat values: miles this week, runs this week,
+    /// all-time miles, and weekly streak.
+    /// → See ActivityService.cs → GetDashboardStatsAsync()
+    /// </summary>
+    [HttpGet("dashboard-stats")]
+    [ProducesResponseType(typeof(DashboardStatsDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetDashboardStats()
+    {
+        int userId = _tokenService.GetUserIdFromToken(User);
+        DashboardStatsDto stats = await _activityService.GetDashboardStatsAsync(userId);
+        return Ok(stats);
+    }
+
+    /// <summary>
+    /// Returns the Strava athlete profile stored during OAuth.
+    /// Returns 204 if the user hasn't connected Strava yet or profile data hasn't been synced.
+    /// </summary>
+    [HttpGet("athlete-profile")]
+    [ProducesResponseType(typeof(AthleteProfileDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> GetAthleteProfile()
+    {
+        int userId = _tokenService.GetUserIdFromToken(User);
+        AthleteProfileDto? profile = await _activityService.GetAthleteProfileAsync(userId);
+        return profile is null ? NoContent() : Ok(profile);
     }
 }
 

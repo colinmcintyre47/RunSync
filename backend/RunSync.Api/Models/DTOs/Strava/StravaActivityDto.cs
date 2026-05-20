@@ -49,4 +49,35 @@ public class StravaActivityDto
 
     [JsonPropertyName("manual")]
     public bool Manual { get; set; }
+
+    [JsonPropertyName("suffer_score")]
+    public int? SufferScore { get; set; }
+
+    [JsonPropertyName("average_cadence")]
+    public float AverageCadence { get; set; }
+
+    // 0=default run, 1=race, 2=long run, 3=workout — null for many regular runs
+    [JsonPropertyName("workout_type")]
+    public int? WorkoutType { get; set; }
+
+    [JsonPropertyName("max_heartrate")]
+    public float MaxHeartrate { get; set; }
+
+    [JsonPropertyName("sport_type")]
+    public string SportType { get; set; } = string.Empty;
+
+    [JsonPropertyName("elapsed_time")]
+    public int ElapsedTime { get; set; }
+
+    [JsonPropertyName("pr_count")]
+    public int PrCount { get; set; }
+
+    [JsonPropertyName("map")]
+    public StravaMapDto? Map { get; set; }
+}
+
+public class StravaMapDto
+{
+    [JsonPropertyName("summary_polyline")]
+    public string SummaryPolyline { get; set; } = string.Empty;
 }

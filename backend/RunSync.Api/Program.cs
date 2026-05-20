@@ -47,6 +47,7 @@ builder.Services.AddDbContext<RunSyncDbContext>(options =>
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IStravaService, StravaService>();
 builder.Services.AddScoped<IActivityService, ActivityService>();
+builder.Services.AddScoped<ITrainingPlanService, TrainingPlanService>();
 
 // HttpClient factory for StravaService — avoids socket exhaustion from newing HttpClient
 builder.Services.AddHttpClient();
@@ -131,6 +132,14 @@ builder.Services.AddSwaggerGen(options =>
 // ── 7. Build + Configure Pipeline ─────────────────────────────────────────────
 
 WebApplication app = builder.Build();
+
+// Apply any pending EF Core migrations automatically on startup.
+// Safe to run on every restart — EF skips migrations already recorded in __EFMigrationsHistory.
+using (IServiceScope scope = app.Services.CreateScope())
+{
+    RunSyncDbContext db = scope.ServiceProvider.GetRequiredService<RunSyncDbContext>();
+    await db.Database.MigrateAsync();
+}
 
 // Exception handler must be first — it wraps the entire pipeline
 app.UseExceptionHandling();

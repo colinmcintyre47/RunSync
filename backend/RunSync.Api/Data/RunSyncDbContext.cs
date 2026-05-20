@@ -25,6 +25,7 @@ public class RunSyncDbContext : DbContext
     public DbSet<User> Users { get; set; }
     public DbSet<StravaToken> StravaTokens { get; set; }
     public DbSet<StravaActivity> StravaActivities { get; set; }
+    public DbSet<UserTrainingPlan> UserTrainingPlans { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -46,6 +47,20 @@ public class RunSyncDbContext : DbContext
                   .WithOne(u => u.StravaToken)
                   .HasForeignKey<StravaToken>(t => t.UserId)
                   .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── UserTrainingPlan (one-to-one with User) ─────────────────────────
+        modelBuilder.Entity<UserTrainingPlan>(entity =>
+        {
+            entity.HasOne(p => p.User)
+                  .WithOne(u => u.TrainingPlan)
+                  .HasForeignKey<UserTrainingPlan>(p => p.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(p => p.GoalType).HasMaxLength(20).IsRequired();
+            entity.Property(p => p.FitnessLevel).HasMaxLength(20).IsRequired();
+            entity.Property(p => p.RunDays).HasMaxLength(100).IsRequired();
+            entity.Property(p => p.LongRunDay).HasMaxLength(10).IsRequired();
         });
 
         // ── StravaActivity (one-to-many with User) ──────────────────────────

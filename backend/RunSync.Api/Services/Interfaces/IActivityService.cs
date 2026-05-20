@@ -10,11 +10,10 @@ namespace RunSync.Api.Services.Interfaces;
 
 public interface IActivityService
 {
-    // Returns the full training plan with actual Strava activities matched by date.
-    // → See ActivityService.cs → GetMatchedActivitiesAsync() for matching logic
     Task<List<TrainingDayActivityDto>> GetMatchedActivitiesAsync(int userId);
-
-    // Returns the timestamp of the most recent sync and the total cached activity count.
-    // → See ActivityService.cs → GetSyncStatusAsync() for implementation
     Task<(DateTime? LastSyncedAt, int TotalActivities, bool IsConnected)> GetSyncStatusAsync(int userId);
+
+    Task<List<WeekSummaryDto>> GetWeeklyLogAsync(int userId);
+    Task<DashboardStatsDto> GetDashboardStatsAsync(int userId);
+    Task<AthleteProfileDto?> GetAthleteProfileAsync(int userId);
 }

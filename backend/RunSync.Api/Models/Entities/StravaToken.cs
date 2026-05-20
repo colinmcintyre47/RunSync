@@ -28,9 +28,13 @@ public class StravaToken
     // Compare against DateTimeOffset.UtcNow.ToUnixTimeSeconds() to check expiry.
     public long ExpiresAt { get; set; }
 
-    // Strava's internal ID for the authenticated athlete — useful for building Strava profile links
     public int StravaAthleteId { get; set; }
-
-    // Tracks when activities were last pulled from Strava — shown in SyncStatus UI
     public DateTime LastSyncedAt { get; set; }
+
+    // Athlete profile — populated during OAuth and kept in sync
+    public string AthleteFirstName { get; set; } = string.Empty;
+    public string AthleteLastName { get; set; } = string.Empty;
+    public string AthleteProfileUrl { get; set; } = string.Empty;
+    public string AthleteCity { get; set; } = string.Empty;
+    public string AthleteState { get; set; } = string.Empty;
 }

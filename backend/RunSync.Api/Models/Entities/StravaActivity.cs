@@ -50,7 +50,31 @@ public class StravaActivity
     // because training plans are date-based in local time, not UTC
     public DateTime StartDateLocal { get; set; }
 
-    // Strava flag indicating the activity was entered manually (not recorded by a device).
-    // We keep these but flag them differently in the UI.
     public bool IsManualEntry { get; set; }
+
+    // ── Enrichment fields added in v2 ─────────────────────────────────────────
+
+    // Strava's proprietary training load metric (0–500+). Null if HR data unavailable.
+    public int? SufferScore { get; set; }
+
+    // Steps per minute. 0 if not recorded.
+    public float AverageCadence { get; set; }
+
+    // 0=default run, 1=race, 2=long run, 3=workout
+    public int WorkoutType { get; set; }
+
+    // Peak heart rate during the activity. 0 if no HR monitor.
+    public float MaxHeartrate { get; set; }
+
+    // More granular than Type: "Run", "TrailRun", "VirtualRun", "Treadmill", etc.
+    public string SportType { get; set; } = string.Empty;
+
+    // Total wall-clock time including stops (MovingTimeSeconds excludes stops)
+    public int ElapsedTimeSeconds { get; set; }
+
+    // Number of segment PRs set during this activity
+    public int PrCount { get; set; }
+
+    // Google-encoded polyline of the route. Empty for treadmill/manual entries.
+    public string SummaryPolyline { get; set; } = string.Empty;
 }
