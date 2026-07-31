@@ -135,12 +135,23 @@ dotnet run
 ```bash
 cd frontend
 
-# Create local env file
+# Create local env file (see .env.example)
 echo "VITE_API_BASE_URL=http://localhost:5000" > .env.local
 
 npm install
-npm run dev   # http://localhost:5173
+npm run dev        # http://localhost:5173
 ```
+
+Other scripts: `npm run build` (typecheck + production bundle into `dist/`),
+`npm run typecheck`, `npm run preview`.
+
+### First run
+
+1. Open http://localhost:5173 and create an account
+2. You'll land in **Settings**, because a new account has no Strava application yet
+3. Follow the on-screen steps, or send someone the full walkthrough in
+   [docs/CONNECTING_STRAVA.md](docs/CONNECTING_STRAVA.md)
+4. Save the credentials, then **Connect Strava** → **Sync Now**
 
 ### Environment Variables
 
@@ -216,6 +227,10 @@ own free application and is the sole athlete on it.
 2. Set **Authorization Callback Domain** to RunSync's API host (the settings screen shows the
    exact value with a copy button — it's the host of `Strava__RedirectUri`, no scheme or path)
 3. Paste the Client ID and Client Secret into RunSync's settings screen
+
+The in-app Settings screen walks through this. For a fuller version to send to someone —
+including troubleshooting for the errors people actually hit — see
+**[docs/CONNECTING_STRAVA.md](docs/CONNECTING_STRAVA.md)**.
 
 Every user's application points at the same RunSync callback URL; the signed OAuth `state`
 parameter is what identifies which user — and therefore which application — a callback belongs to.

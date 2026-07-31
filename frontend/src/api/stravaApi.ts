@@ -21,10 +21,36 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string;
 
+// ── Auth token storage ────────────────────────────────────────────────────────
+// localStorage rather than a cookie because the API is on a different origin and
+// authenticates with a Bearer token. The session survives a page reload, which the
+// Strava OAuth round trip depends on — the user leaves the site entirely and comes
+// back via a redirect from Strava.
+
+const TOKEN_KEY = 'runsync_token';
+const DISPLAY_NAME_KEY = 'runsync_display_name';
+
+export function storeAuth(auth: AuthResponse): void {
+  localStorage.setItem(TOKEN_KEY, auth.token);
+  localStorage.setItem(DISPLAY_NAME_KEY, auth.displayName);
+}
+
+export function clearAuth(): void {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(DISPLAY_NAME_KEY);
+}
+
+/** Returns the stored session, or null if the user isn't signed in. */
+export function getStoredAuth(): { token: string; displayName: string } | null {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) return null;
+  return { token, displayName: localStorage.getItem(DISPLAY_NAME_KEY) ?? '' };
+}
+
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
 function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('runsync_token');
+  const token = localStorage.getItem(TOKEN_KEY);
   return token
     ? { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
     : { 'Content-Type': 'application/json' };
@@ -49,10 +75,29 @@ function extractErrorMessage(body: unknown, status: number): string {
   return `HTTP ${status}`;
 }
 
+/**
+ * Error carrying the HTTP status alongside the message, so callers can react to specific
+ * failures — App.tsx signs the user out on a 401 rather than showing "HTTP 401" forever.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+async function throwApiError(response: Response, fallback: string): Promise<never> {
+  const body = await response.json().catch(() => null);
+  const message = body === null ? fallback : extractErrorMessage(body, response.status);
+  throw new ApiError(message, response.status);
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw new Error(extractErrorMessage(body, response.status));
+    await throwApiError(response, `HTTP ${response.status}`);
   }
   return response.json() as Promise<T>;
 }
@@ -127,8 +172,7 @@ export async function deleteStravaCredentials(): Promise<void> {
     headers: getAuthHeaders(),
   });
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to remove credentials' }));
-    throw new Error(error.message ?? `HTTP ${response.status}`);
+    await throwApiError(response, 'Failed to remove credentials');
   }
 }
 
@@ -148,8 +192,7 @@ export async function triggerSync(): Promise<void> {
     headers: getAuthHeaders(),
   });
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Sync failed' }));
-    throw new Error(error.message ?? `HTTP ${response.status}`);
+    await throwApiError(response, 'Sync failed');
   }
 }
 
@@ -159,7 +202,6 @@ export async function disconnectStrava(): Promise<void> {
     headers: getAuthHeaders(),
   });
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Disconnect failed' }));
-    throw new Error(error.message ?? `HTTP ${response.status}`);
+    await throwApiError(response, 'Disconnect failed');
   }
 }
