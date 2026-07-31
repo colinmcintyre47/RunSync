@@ -10,14 +10,21 @@
 //   4. SyncActivitiesAsync       → fetches all runs and upserts them into StravaActivities table
 //   5. DisconnectAsync           → removes stored tokens so the user can re-connect later
 //
-// Rate limit awareness: Strava allows 200 requests/15 min and 2,000/day.
-// Syncing fetches all activities in paginated batches (200 per page) until exhausted.
+// Rate limit awareness: Strava allows 200 requests/15 min and 2,000/day. Because every user
+// authenticates against their OWN Strava application (see StravaAppCredential.cs), these limits
+// apply per user rather than being shared across all of RunSync.
+//
+// Credential sourcing: the client_id and client_secret are resolved per user from
+// StravaCredentialService. Only the non-secret endpoints (authorize/token/API base URLs and the
+// shared redirect URI) come from StravaConfig, because those are identical for every user.
 //
 // → Interface: IStravaService.cs
 // → Called by StravaController.cs
+// → Per-user credentials from StravaCredentialService.cs
 // → Tokens persisted to StravaToken entity (see Models/Entities/StravaToken.cs)
 // → Activities persisted to StravaActivity entity (see Models/Entities/StravaActivity.cs)
 
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -27,6 +34,7 @@ using RunSync.Api.Data;
 using RunSync.Api.Models.Config;
 using RunSync.Api.Models.DTOs.Strava;
 using RunSync.Api.Models.Entities;
+using RunSync.Api.Models.Exceptions;
 using RunSync.Api.Services.Interfaces;
 
 namespace RunSync.Api.Services;
@@ -35,6 +43,7 @@ public class StravaService : IStravaService
 {
     private readonly RunSyncDbContext _db;
     private readonly IOptions<StravaConfig> _stravaConfig;
+    private readonly IStravaCredentialService _credentials;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<StravaService> _logger;
@@ -47,40 +56,45 @@ public class StravaService : IStravaService
     public StravaService(
         RunSyncDbContext db,
         IOptions<StravaConfig> stravaConfig,
+        IStravaCredentialService credentials,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         ILogger<StravaService> logger)
     {
         _db = db;
         _stravaConfig = stravaConfig;
+        _credentials = credentials;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
     }
 
     /// <summary>
-    /// Builds the Strava OAuth authorization URL. The userId is encoded in a short-lived JWT
-    /// passed as the "state" parameter — Strava echoes this back in the callback, which lets
-    /// us verify the request was initiated by this user (CSRF protection).
+    /// Builds the Strava OAuth authorization URL against the user's OWN Strava application.
+    /// The userId is encoded in a signed state parameter — Strava echoes this back in the
+    /// callback, which lets us verify the request was initiated by this user (CSRF protection)
+    /// and look up whose client secret to use for the code exchange.
+    /// Throws if the user hasn't registered their Strava application yet.
     /// → After user approves, Strava redirects to StravaController.cs → Callback()
     /// </summary>
-    public Task<string> GetAuthorizationUrlAsync(int userId)
+    public async Task<string> GetAuthorizationUrlAsync(int userId)
     {
         StravaConfig config = _stravaConfig.Value;
 
-        // Encode userId in the state param as a signed JWT so we can verify it in the callback
+        // Only the client_id is needed here — the secret never appears in a browser-visible URL.
+        StravaCredential credential = await _credentials.ResolveAsync(userId);
+
+        // Encode userId in the state param as a signed token so we can verify it in the callback
         // without storing server-side session state. This prevents CSRF on the OAuth flow.
         string stateToken = GenerateStateToken(userId);
 
-        string url = $"{config.AuthorizationUrl}" +
-                     $"?client_id={config.ClientId}" +
-                     $"&redirect_uri={Uri.EscapeDataString(config.RedirectUri)}" +
-                     $"&response_type=code" +
-                     $"&approval_prompt=auto" +
-                     $"&scope={config.Scope}" +
-                     $"&state={stateToken}";
-
-        return Task.FromResult(url);
+        return $"{config.AuthorizationUrl}" +
+               $"?client_id={Uri.EscapeDataString(credential.ClientId)}" +
+               $"&redirect_uri={Uri.EscapeDataString(config.RedirectUri)}" +
+               $"&response_type=code" +
+               $"&approval_prompt=auto" +
+               $"&scope={Uri.EscapeDataString(config.Scope)}" +
+               $"&state={Uri.EscapeDataString(stateToken)}";
     }
 
     /// <summary>
@@ -93,19 +107,20 @@ public class StravaService : IStravaService
     public async Task ExchangeCodeForTokenAsync(string code, int userId)
     {
         StravaConfig config = _stravaConfig.Value;
+        StravaCredential credential = await _credentials.ResolveAsync(userId);
 
         using HttpClient client = _httpClientFactory.CreateClient();
 
-        FormUrlEncodedContent requestBody = new(new Dictionary<string, string>
+        using FormUrlEncodedContent requestBody = new(new Dictionary<string, string>
         {
-            ["client_id"] = config.ClientId,
-            ["client_secret"] = config.ClientSecret,
+            ["client_id"] = credential.ClientId,
+            ["client_secret"] = credential.ClientSecret,
             ["code"] = code,
             ["grant_type"] = "authorization_code"
         });
 
-        HttpResponseMessage response = await client.PostAsync(config.TokenUrl, requestBody);
-        response.EnsureSuccessStatusCode();
+        using HttpResponseMessage response = await client.PostAsync(config.TokenUrl, requestBody);
+        await EnsureStravaSuccessAsync(response, userId, "token exchange");
 
         string responseJson = await response.Content.ReadAsStringAsync();
         StravaTokenResponseDto? tokenResponse = JsonSerializer.Deserialize<StravaTokenResponseDto>(responseJson, JsonOptions);
@@ -165,8 +180,8 @@ public class StravaService : IStravaService
         while (true)
         {
             string url = $"{config.ApiBaseUrl}/athlete/activities?per_page={perPage}&page={page}";
-            HttpResponseMessage response = await client.GetAsync(url);
-            response.EnsureSuccessStatusCode();
+            using HttpResponseMessage response = await client.GetAsync(url);
+            await EnsureStravaSuccessAsync(response, userId, "activity fetch");
 
             string json = await response.Content.ReadAsStringAsync();
             List<StravaActivityDto>? activities = JsonSerializer.Deserialize<List<StravaActivityDto>>(json, JsonOptions);
@@ -222,6 +237,49 @@ public class StravaService : IStravaService
     // ─── Private helpers ────────────────────────────────────────────────────
 
     /// <summary>
+    /// Translates a failed Strava response into an exception the user can act on.
+    ///
+    /// Since every user supplies their own API application, a 400/401 here almost always means
+    /// their Client ID/Secret is wrong or their app's callback domain doesn't match — conditions
+    /// they can fix themselves. Bare EnsureSuccessStatusCode() would surface those as an opaque
+    /// 500, so they are mapped to StravaCredentialException (→ HTTP 400) instead.
+    ///
+    /// The Strava response body is logged but never returned to the client: on the token
+    /// endpoint it can echo back submitted credential fields.
+    /// </summary>
+    private async Task EnsureStravaSuccessAsync(HttpResponseMessage response, int userId, string operation)
+    {
+        if (response.IsSuccessStatusCode)
+            return;
+
+        string body = await response.Content.ReadAsStringAsync();
+
+        _logger.LogWarning(
+            "Strava {Operation} failed for user {UserId}. Status: {StatusCode}. Body: {Body}",
+            operation, userId, (int)response.StatusCode, body);
+
+        HttpRequestException inner = new(
+            $"Strava {operation} returned {(int)response.StatusCode}.", null, response.StatusCode);
+
+        // Explicitly typed as Exception: the arms return three unrelated exception types, which
+        // leaves a switch expression with no best common type.
+        Exception failure = response.StatusCode switch
+        {
+            HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized
+                => StravaCredentialException.Rejected(inner),
+
+            HttpStatusCode.TooManyRequests => new InvalidOperationException(
+                "Strava's rate limit for your API application has been reached. " +
+                "Limits reset every 15 minutes — please try again shortly."),
+
+            // Anything else is an upstream problem → mapped to 502 by ExceptionHandlingMiddleware.
+            _ => inner
+        };
+
+        throw failure;
+    }
+
+    /// <summary>
     /// Calls Strava's token endpoint with grant_type=refresh_token to obtain a new access token.
     /// Mutates the passed StravaToken entity in-place and saves the changes.
     /// Always called by GetValidAccessTokenAsync() — never directly by external code.
@@ -229,19 +287,20 @@ public class StravaService : IStravaService
     private async Task RefreshTokenAsync(int userId, StravaToken token)
     {
         StravaConfig config = _stravaConfig.Value;
+        StravaCredential credential = await _credentials.ResolveAsync(userId);
 
         using HttpClient client = _httpClientFactory.CreateClient();
 
-        FormUrlEncodedContent requestBody = new(new Dictionary<string, string>
+        using FormUrlEncodedContent requestBody = new(new Dictionary<string, string>
         {
-            ["client_id"] = config.ClientId,
-            ["client_secret"] = config.ClientSecret,
+            ["client_id"] = credential.ClientId,
+            ["client_secret"] = credential.ClientSecret,
             ["refresh_token"] = token.RefreshToken,
             ["grant_type"] = "refresh_token"
         });
 
-        HttpResponseMessage response = await client.PostAsync(config.TokenUrl, requestBody);
-        response.EnsureSuccessStatusCode();
+        using HttpResponseMessage response = await client.PostAsync(config.TokenUrl, requestBody);
+        await EnsureStravaSuccessAsync(response, userId, "token refresh");
 
         string json = await response.Content.ReadAsStringAsync();
         StravaTokenResponseDto? refreshed = JsonSerializer.Deserialize<StravaTokenResponseDto>(json, JsonOptions);

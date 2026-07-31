@@ -11,7 +11,13 @@
 // → Types defined in: frontend/src/types/strava.ts
 // → Consumed by: frontend/src/hooks/useStravaActivities.ts
 
-import type { AuthResponse, SyncStatus, TrainingDayActivity } from '../types/strava';
+import type {
+  AuthResponse,
+  StravaCredentialInput,
+  StravaCredentialStatus,
+  SyncStatus,
+  TrainingDayActivity,
+} from '../types/strava';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string;
 
@@ -24,10 +30,29 @@ function getAuthHeaders(): HeadersInit {
     : { 'Content-Type': 'application/json' };
 }
 
+// Two different error shapes can come back:
+//   - ExceptionHandlingMiddleware  → { statusCode, message, traceId }
+//   - ASP.NET [ApiController] model validation → ProblemDetails with { errors: { Field: [...] } }
+// Without the ProblemDetails branch, a bad Client ID would surface as a useless "HTTP 400".
+function extractErrorMessage(body: unknown, status: number): string {
+  if (typeof body === 'object' && body !== null) {
+    const problem = body as { message?: string; errors?: Record<string, string[]> };
+
+    if (problem.errors) {
+      const messages = Object.values(problem.errors).flat().filter(Boolean);
+      if (messages.length > 0) return messages.join(' ');
+    }
+
+    if (problem.message) return problem.message;
+  }
+
+  return `HTTP ${status}`;
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Request failed' }));
-    throw new Error(error.message ?? `HTTP ${response.status}`);
+    const body = await response.json().catch(() => null);
+    throw new Error(extractErrorMessage(body, response.status));
   }
   return response.json() as Promise<T>;
 }
@@ -70,6 +95,41 @@ export async function getSyncStatus(): Promise<SyncStatus> {
     headers: getAuthHeaders(),
   });
   return handleResponse<SyncStatus>(response);
+}
+
+// ── Strava API application credentials ────────────────────────────────────────
+//
+// Every user brings their own Strava API application. These three calls manage it.
+// The client secret travels in exactly one direction — into saveStravaCredentials() — and
+// is never returned by any endpoint.
+
+export async function getStravaCredentialStatus(): Promise<StravaCredentialStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/strava/credentials`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse<StravaCredentialStatus>(response);
+}
+
+export async function saveStravaCredentials(
+  input: StravaCredentialInput
+): Promise<StravaCredentialStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/strava/credentials`, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(input),
+  });
+  return handleResponse<StravaCredentialStatus>(response);
+}
+
+export async function deleteStravaCredentials(): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/strava/credentials`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to remove credentials' }));
+    throw new Error(error.message ?? `HTTP ${response.status}`);
+  }
 }
 
 // ── Strava endpoints ──────────────────────────────────────────────────────────

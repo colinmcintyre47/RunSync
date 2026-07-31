@@ -26,6 +26,7 @@ public class RunSyncDbContext : DbContext
     public DbSet<StravaToken> StravaTokens { get; set; }
     public DbSet<StravaActivity> StravaActivities { get; set; }
     public DbSet<UserTrainingPlan> UserTrainingPlans { get; set; }
+    public DbSet<StravaAppCredential> StravaAppCredentials { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -47,6 +48,23 @@ public class RunSyncDbContext : DbContext
                   .WithOne(u => u.StravaToken)
                   .HasForeignKey<StravaToken>(t => t.UserId)
                   .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── StravaAppCredential (one-to-one with User) ──────────────────────
+        // Each user registers their own Strava API application; these are its credentials.
+        // ClientSecretEncrypted holds AES-256-GCM ciphertext, never a plaintext secret.
+        modelBuilder.Entity<StravaAppCredential>(entity =>
+        {
+            entity.HasOne(c => c.User)
+                  .WithOne(u => u.StravaAppCredential)
+                  .HasForeignKey<StravaAppCredential>(c => c.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(c => c.ClientId).HasMaxLength(64).IsRequired();
+
+            // The ciphertext payload ("v1." + base64 of nonce|tag|ciphertext) is well under
+            // 512 chars for a 40-character Strava secret, with headroom for key rotation.
+            entity.Property(c => c.ClientSecretEncrypted).HasMaxLength(512).IsRequired();
         });
 
         // ── UserTrainingPlan (one-to-one with User) ─────────────────────────
