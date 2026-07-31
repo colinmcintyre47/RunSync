@@ -17,6 +17,7 @@
 //   specific HTTP status codes. Everything else becomes a 500.
 
 using System.Net;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace RunSync.Api.Middleware;
@@ -52,9 +53,15 @@ public class ExceptionHandlingMiddleware
 
         (HttpStatusCode statusCode, string message) = exception switch
         {
+            // StravaCredentialException derives from InvalidOperationException, so it lands here
+            // and keeps its message — those messages tell the user how to fix their Strava app setup.
             InvalidOperationException => (HttpStatusCode.BadRequest, exception.Message),
             UnauthorizedAccessException => (HttpStatusCode.Unauthorized, "You are not authorized to perform this action."),
             KeyNotFoundException => (HttpStatusCode.NotFound, exception.Message),
+            // Strava unreachable or returning an unexpected status — upstream's fault, not the caller's.
+            HttpRequestException => (HttpStatusCode.BadGateway, "Strava could not be reached. Please try again in a moment."),
+            // Never let a decryption failure reach the client verbatim — it would leak key state.
+            CryptographicException => (HttpStatusCode.InternalServerError, "A stored secret could not be read."),
             _ => (HttpStatusCode.InternalServerError, "An unexpected error occurred.")
         };
 

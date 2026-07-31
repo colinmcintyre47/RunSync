@@ -36,3 +36,27 @@ export interface AuthResponse {
   displayName: string;
   email: string;
 }
+
+// Mirrors StravaCredentialStatusDto.cs
+//
+// Each user registers their own free Strava API application (a free app supports exactly one
+// athlete — themselves), so RunSync isn't capped by a single shared app's athlete limit.
+//
+// Note there is no clientSecret field, and there must never be one: the backend encrypts the
+// secret on save and never returns it. The UI shows a masked placeholder once configured and
+// requires a fresh paste to change it — same posture as a password.
+export interface StravaCredentialStatus {
+  isConfigured: boolean;
+  clientId: string | null;
+  // The bare domain the user must enter as "Authorization Callback Domain" on Strava.
+  callbackDomain: string;
+  // The full callback URL, shown for reference.
+  redirectUri: string;
+  updatedAt: string | null;  // ISO 8601, or null if never configured
+}
+
+// Request body for saving credentials. Write-only — never returned by the API.
+export interface StravaCredentialInput {
+  clientId: string;
+  clientSecret: string;
+}

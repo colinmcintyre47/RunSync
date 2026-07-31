@@ -25,6 +25,10 @@ public class User
     // Navigation property — null if the user hasn't connected Strava yet
     public StravaToken? StravaToken { get; set; }
 
+    // The user's own Strava API application credentials — null until they register one.
+    // Must exist before StravaToken can, since OAuth cannot start without it.
+    public StravaAppCredential? StravaAppCredential { get; set; }
+
     public ICollection<StravaActivity> Activities { get; set; } = new List<StravaActivity>();
 
     public UserTrainingPlan? TrainingPlan { get; set; }

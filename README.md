@@ -4,6 +4,8 @@
 
 RunSync is a full-stack web application that authenticates with Strava via OAuth 2.0, syncs your running activities, and overlays them on a structured 12-week half marathon training plan — showing planned vs. actual mileage, pace, and heart rate for every workout.
 
+**Bring your own Strava app.** A free Strava API application has an athlete capacity of 1 ("Single Player Mode"), so a single shared application would cap RunSync at one user. Instead, each user registers their own free Strava application and saves its credentials in RunSync — every user is the only athlete on their own app. Client secrets are encrypted with AES-256-GCM before storage and are never returned by the API. This also means Strava rate limits apply per user rather than being shared.
+
 ---
 
 ## Tech Stack
@@ -52,6 +54,8 @@ RunSync is a full-stack web application that authenticates with Strava via OAuth
 ## Features
 
 - **Strava OAuth 2.0** — connect and disconnect your Strava account
+- **Per-user Strava apps** — each user supplies their own API credentials, so there's no shared athlete cap
+- **Encrypted secrets at rest** — AES-256-GCM, per-user AAD binding, decrypt-only key rotation
 - **Activity Sync** — paginated fetch of all runs, upserted into local cache
 - **Automatic Token Refresh** — expired Strava tokens are refreshed transparently
 - **Training Plan Matching** — each run matched to the corresponding plan day by local date
@@ -80,6 +84,12 @@ cd backend/RunSync.Api
 cp appsettings.json appsettings.Development.json
 ```
 
+Generate an encryption key for the per-user Strava client secrets:
+
+```bash
+openssl rand -base64 32
+```
+
 Edit `appsettings.Development.json` and fill in all values:
 
 ```json
@@ -94,9 +104,11 @@ Edit `appsettings.Development.json` and fill in all values:
     "ExpiryMinutes": 60
   },
   "Strava": {
-    "ClientId": "your-strava-client-id",
-    "ClientSecret": "your-strava-client-secret",
     "RedirectUri": "http://localhost:5000/api/strava/callback"
+  },
+  "Encryption": {
+    "MasterKey": "base64-32-bytes-from-openssl-rand",
+    "PreviousKeys": []
   },
   "Cors": {
     "AllowedOrigin": "http://localhost:5173"
@@ -106,6 +118,9 @@ Edit `appsettings.Development.json` and fill in all values:
   }
 }
 ```
+
+There is no `Strava:ClientId` or `Strava:ClientSecret` — those are per user now, entered in the
+app's settings screen and stored encrypted. See [Per-user Strava credentials](#per-user-strava-credentials).
 
 ```bash
 # Create the database schema
@@ -135,9 +150,9 @@ npm run dev   # http://localhost:5173
 | `Jwt__Key`             | appsettings / AWS EB env      | HMAC-SHA256 signing key (min 32 chars)         |
 | `Jwt__Issuer`          | appsettings / AWS EB env      | JWT issuer claim (e.g. `RunSync`)              |
 | `Jwt__Audience`        | appsettings / AWS EB env      | JWT audience claim (e.g. `RunSync`)            |
-| `Strava__ClientId`     | appsettings / AWS EB env      | From your Strava API application               |
-| `Strava__ClientSecret` | appsettings / AWS EB env      | From your Strava API application               |
-| `Strava__RedirectUri`  | appsettings / AWS EB env      | Must match exactly what's set in Strava app    |
+| `Strava__RedirectUri`  | appsettings / AWS EB env      | RunSync's own callback URL, shared by all users |
+| `Encryption__MasterKey` | appsettings / AWS EB env     | Base64 32 bytes. Encrypts users' Strava secrets |
+| `Encryption__PreviousKeys__0` | AWS EB env (optional)  | Retired key, decrypt-only, kept during rotation |
 | `Cors__AllowedOrigin`  | appsettings / AWS EB env      | Your Netlify site URL (no trailing slash)      |
 | `TrainingPlan__StartDate` | appsettings               | ISO date: Monday of Week 1 (e.g. `2026-02-02`)|
 | `VITE_API_BASE_URL`    | `.env.local` / Netlify        | Full URL to the backend API                    |
@@ -175,10 +190,61 @@ Set all environment variables under **Configuration → Software → Environment
 
 Store sensitive values in Secrets Manager as individual string secrets:
 - `runsync/Jwt__Key`
-- `runsync/Strava__ClientSecret`
+- `runsync/Encryption__MasterKey`
 - `runsync/ConnectionStrings__DefaultConnection`
 
 Reference them in your EB environment properties using the `resolve:ssm:` prefix or load them programmatically in `Program.cs`.
+
+> **Losing `Encryption__MasterKey` is unrecoverable.** Every stored Strava client secret is
+> encrypted under it; without it, every user has to re-enter their credentials. Back it up
+> somewhere separate from the database.
+
+---
+
+## Per-user Strava credentials
+
+### Why
+
+A free Strava API application starts in **Single Player Mode** with an athlete capacity of 1.
+Self-upgrading in the Strava dashboard raises that to 10 — still a hard ceiling, and anything
+beyond it requires app review. RunSync sidesteps the ceiling entirely: each user registers their
+own free application and is the sole athlete on it.
+
+### What the user does
+
+1. Create an application at [strava.com/settings/api](https://www.strava.com/settings/api)
+2. Set **Authorization Callback Domain** to RunSync's API host (the settings screen shows the
+   exact value with a copy button — it's the host of `Strava__RedirectUri`, no scheme or path)
+3. Paste the Client ID and Client Secret into RunSync's settings screen
+
+Every user's application points at the same RunSync callback URL; the signed OAuth `state`
+parameter is what identifies which user — and therefore which application — a callback belongs to.
+
+### How the secret is protected
+
+| Concern | Handling |
+|---------|----------|
+| Algorithm | AES-256-GCM (authenticated — tampering is detected, not silently decrypted) |
+| Nonce | Fresh 12 random bytes per encryption, never reused or derived |
+| Stored format | `v1.` + base64(nonce ‖ tag ‖ ciphertext) |
+| Row binding | The user id is bound in as AAD, so a ciphertext moved to another user's row fails to decrypt |
+| Readback | No endpoint returns the secret; the UI shows a masked placeholder and requires a fresh paste |
+| Logging | Only the fact of a save is logged. Strava error bodies are logged but never returned to clients |
+| Key rotation | `Encryption__MasterKey` encrypts; `Encryption__PreviousKeys` decrypt only |
+| Startup | An invalid or missing master key fails the app at boot, not at first use |
+
+ASP.NET Core Data Protection was deliberately *not* used: its default key ring lives on the local
+file system, which Elastic Beanstalk wipes on redeploy and does not share between instances —
+every stored secret would become permanently undecryptable after a deploy.
+
+### Rotating the master key
+
+1. Add the current key to `Encryption__PreviousKeys__0`
+2. Set `Encryption__MasterKey` to a newly generated key
+3. Deploy — existing secrets still decrypt under the previous key, new writes use the new one
+4. Once every user has re-saved their credentials, remove the previous key
+
+Note that step 4 currently requires user action; there is no bulk re-encryption job yet.
 
 ---
 
@@ -190,6 +256,9 @@ All authenticated endpoints require `Authorization: Bearer <jwt>` header.
 |----------|-----------------------------------|------|-----------------------------------------------------|
 | `POST`   | `/api/auth/register`              | No   | Create account. Returns JWT.                        |
 | `POST`   | `/api/auth/login`                 | No   | Login. Returns JWT.                                 |
+| `GET`    | `/api/strava/credentials`         | Yes  | Strava app setup status + callback domain. No secret |
+| `PUT`    | `/api/strava/credentials`         | Yes  | Save own Client ID + Secret (encrypted on write)    |
+| `DELETE` | `/api/strava/credentials`         | Yes  | Remove credentials and any tokens they issued       |
 | `GET`    | `/api/strava/authorize`           | Yes  | Returns Strava OAuth URL for frontend to redirect to|
 | `GET`    | `/api/strava/callback`            | No   | Strava OAuth callback — exchanges code for tokens   |
 | `POST`   | `/api/strava/sync`                | Yes  | Manually trigger activity sync from Strava          |
@@ -210,6 +279,14 @@ Users
   PasswordHash  TEXT NOT NULL           -- BCrypt hash, work factor 12
   DisplayName   VARCHAR(64) NOT NULL
   CreatedAt     DATETIME NOT NULL
+
+StravaAppCredentials              -- the user's OWN Strava API application
+  Id                     INT PK AUTO_INCREMENT
+  UserId                 INT FK → Users.Id (CASCADE DELETE, UNIQUE)
+  ClientId               VARCHAR(64) NOT NULL   -- public; appears in the OAuth URL
+  ClientSecretEncrypted  VARCHAR(512) NOT NULL  -- AES-256-GCM, "v1.<base64>" — never plaintext
+  CreatedAt              DATETIME NOT NULL
+  UpdatedAt              DATETIME NOT NULL
 
 StravaTokens
   Id               INT PK AUTO_INCREMENT
@@ -250,7 +327,9 @@ dotnet test --collect:"XPlat Code Coverage"
 Test coverage areas:
 - `TokenServiceTests` — JWT claim generation, expiry, userId extraction
 - `ActivityServiceTests` — plan matching, miles conversion, pace formatting, sync status
-- `StravaServiceTests` — token refresh, activity upsert, CSRF state validation
+- `SecretProtectorTests` — round-trip, nonce uniqueness, tamper detection, cross-user AAD rejection, key rotation
+- `StravaCredentialServiceTests` — encryption at rest, credential lifecycle, stale-token cleanup
+- `StravaServiceTests` — per-user OAuth URLs, token refresh, Strava error translation, CSRF state validation
 - `ActivitiesControllerTests` — HTTP response codes, service delegation, userId forwarding
 
 ---

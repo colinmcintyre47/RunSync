@@ -32,6 +32,9 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<StravaConfig>(
     builder.Configuration.GetSection("Strava"));
 
+builder.Services.Configure<EncryptionConfig>(
+    builder.Configuration.GetSection("Encryption"));
+
 // ── 2. Database ───────────────────────────────────────────────────────────────
 
 string connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
@@ -46,8 +49,12 @@ builder.Services.AddDbContext<RunSyncDbContext>(options =>
 
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IStravaService, StravaService>();
+builder.Services.AddScoped<IStravaCredentialService, StravaCredentialService>();
 builder.Services.AddScoped<IActivityService, ActivityService>();
 builder.Services.AddScoped<ITrainingPlanService, TrainingPlanService>();
+
+// Singleton: parses and holds the AES keys once. Stateless and thread-safe after construction.
+builder.Services.AddSingleton<ISecretProtector, SecretProtector>();
 
 // HttpClient factory for StravaService — avoids socket exhaustion from newing HttpClient
 builder.Services.AddHttpClient();
@@ -139,6 +146,11 @@ using (IServiceScope scope = app.Services.CreateScope())
 {
     RunSyncDbContext db = scope.ServiceProvider.GetRequiredService<RunSyncDbContext>();
     await db.Database.MigrateAsync();
+
+    // Force-construct the secret protector so an invalid or missing Encryption:MasterKey stops
+    // the app at boot. Left lazy, the failure would instead surface as a 500 the first time a
+    // user tried to save Strava credentials — long after a bad deploy went out.
+    _ = scope.ServiceProvider.GetRequiredService<ISecretProtector>();
 }
 
 // Exception handler must be first — it wraps the entire pipeline
