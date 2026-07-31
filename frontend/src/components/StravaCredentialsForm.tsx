@@ -25,6 +25,7 @@ import {
   saveStravaCredentials,
 } from '../api/stravaApi';
 import type { StravaCredentialStatus } from '../types/strava';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface StravaCredentialsFormProps {
   // Called after credentials are saved or removed, so the parent can refresh connection state.
@@ -323,13 +324,11 @@ const CopyableValue: React.FC<{ value: string }> = ({ value }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
+    // Falls back to execCommand on insecure origins; the value is visible on screen either
+    // way, so a failure just means the user selects it manually.
+    if (await copyToClipboard(value)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard access can be blocked (insecure origin, permissions). The value is visible
-      // on screen either way, so silently fall back to manual selection.
     }
   };
 

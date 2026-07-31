@@ -80,8 +80,38 @@ need to change it, you paste in a fresh one — the same way password fields wor
 3. You'll land back in RunSync with a green "Strava connected" message
 4. Click **Sync Now** to pull in your runs
 
-Your runs will appear on the matching days of your training plan. From then on, click
-**Sync Now** whenever you want to pull in new activities.
+The first sync pulls in your **entire** Strava run history, so it may take a few seconds. From
+then on, click **Sync Now** whenever you want to pull in new activities.
+
+---
+
+## What you'll see
+
+**All runs** (the default tab) — every run you've ever logged, grouped by week, newest first.
+Each row shows distance, pace, moving time, and average heart rate, and links back to the
+activity on Strava.
+
+**Training plan** — the same runs laid over a structured plan, showing planned vs. actual
+mileage for each day.
+
+**The four tiles at the top** — miles this week, runs this week, all-time miles, and your
+weekly streak (consecutive Mon–Sun weeks with at least one run).
+
+---
+
+## Copying your data out
+
+The **Copy all data** button puts every synced run on your clipboard as spreadsheet columns.
+Paste it straight into Google Sheets or Excel — each field lands in its own column, no import
+dialog needed. You get 19 columns per run: date, week, name, sport and workout type, miles,
+moving and elapsed time, pace, average and max heart rate, elevation gain, cadence, suffer
+score, effort level, PR count, whether it was a manual entry, and the Strava ID and link.
+
+Next to it, **as JSON** copies the complete structured export instead — the same runs plus your
+athlete profile, summary stats, and each run's encoded route. Use that one if you're feeding
+the data into another tool.
+
+Both buttons confirm how many runs were copied, so you'll know it worked.
 
 ---
 

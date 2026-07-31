@@ -37,6 +37,57 @@ export interface AuthResponse {
   email: string;
 }
 
+// Mirrors RunActivityDto.cs — one synced Strava run with every field the backend exposes.
+export interface RunActivity {
+  stravaId: number;
+  name: string;
+  date: string;                    // ISO 8601 local start time
+  miles: number;
+  pace: string;                    // formatted "MM:SS /mi"
+  avgHeartrate: number | null;
+  maxHeartrate: number | null;
+  elevationGainFeet: number;
+  effortLevel: string;
+  isManualEntry: boolean;
+  sufferScore: number | null;
+  averageCadence: number | null;   // steps/min
+  workoutTypeLabel: string;        // "Race" | "Long Run" | "Workout" | "Run"
+  sportType: string;               // "Run" | "TrailRun" | "VirtualRun"
+  elapsedTimeSeconds: number;
+  elapsedTime: string;             // formatted "H:MM:SS"
+  movingTime: string;              // formatted "H:MM:SS"
+  prCount: number;
+  summaryPolyline: string;         // encoded route; excluded from the spreadsheet export
+}
+
+// Mirrors WeekSummaryDto.cs — runs grouped into Mon–Sun calendar weeks, newest week first.
+export interface WeekSummary {
+  weekLabel: string;               // e.g. "Week of May 19"
+  weekStart: string;               // "YYYY-MM-DD" (serialized DateOnly)
+  weekEnd: string;                 // "YYYY-MM-DD"
+  totalMiles: number;
+  runCount: number;
+  runs: RunActivity[];
+}
+
+// Mirrors DashboardStatsDto.cs
+export interface DashboardStats {
+  milesThisWeek: number;
+  runsThisWeek: number;
+  totalMilesAllTime: number;
+  weeklyStreak: number;            // consecutive Mon–Sun weeks containing at least one run
+}
+
+// Mirrors AthleteProfileDto.cs. Null until the user connects Strava and syncs.
+export interface AthleteProfile {
+  firstName: string;
+  lastName: string;
+  profileUrl: string;
+  city: string;
+  state: string;
+  stravaAthleteId: number;
+}
+
 // Mirrors StravaCredentialStatusDto.cs
 //
 // Each user registers their own free Strava API application (a free app supports exactly one

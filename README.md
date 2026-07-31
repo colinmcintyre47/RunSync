@@ -57,6 +57,8 @@ RunSync is a full-stack web application that authenticates with Strava via OAuth
 - **Per-user Strava apps** — each user supplies their own API credentials, so there's no shared athlete cap
 - **Encrypted secrets at rest** — AES-256-GCM, per-user AAD binding, decrypt-only key rotation
 - **Activity Sync** — paginated fetch of all runs, upserted into local cache
+- **Full run history** — every synced run grouped into Mon–Sun weeks, plus summary stat tiles
+- **Copy all data** — one click puts every run on the clipboard as spreadsheet columns (or JSON)
 - **Automatic Token Refresh** — expired Strava tokens are refreshed transparently
 - **Training Plan Matching** — each run matched to the corresponding plan day by local date
 - **Planned vs. Actual** — see target miles alongside your real distance, pace, and HR

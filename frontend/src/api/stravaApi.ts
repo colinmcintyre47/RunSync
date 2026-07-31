@@ -12,11 +12,14 @@
 // → Consumed by: frontend/src/hooks/useStravaActivities.ts
 
 import type {
+  AthleteProfile,
   AuthResponse,
+  DashboardStats,
   StravaCredentialInput,
   StravaCredentialStatus,
   SyncStatus,
   TrainingDayActivity,
+  WeekSummary,
 } from '../types/strava';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string;
@@ -140,6 +143,42 @@ export async function getSyncStatus(): Promise<SyncStatus> {
     headers: getAuthHeaders(),
   });
   return handleResponse<SyncStatus>(response);
+}
+
+// ── Synced run data ───────────────────────────────────────────────────────────
+
+/** Every synced run, grouped into Mon–Sun weeks, newest week first. */
+export async function getWeeklyLog(): Promise<WeekSummary[]> {
+  const response = await fetch(`${API_BASE_URL}/api/activities/weekly-log`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse<WeekSummary[]>(response);
+}
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  const response = await fetch(`${API_BASE_URL}/api/activities/dashboard-stats`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse<DashboardStats>(response);
+}
+
+/**
+ * The Strava athlete profile captured during OAuth.
+ * Returns null when the endpoint replies 204 — the user hasn't connected Strava yet.
+ */
+export async function getAthleteProfile(): Promise<AthleteProfile | null> {
+  const response = await fetch(`${API_BASE_URL}/api/activities/athlete-profile`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    await throwApiError(response, `HTTP ${response.status}`);
+  }
+
+  // 204 has an empty body — calling .json() on it would throw.
+  if (response.status === 204) return null;
+
+  return response.json() as Promise<AthleteProfile>;
 }
 
 // ── Strava API application credentials ────────────────────────────────────────
